@@ -33,7 +33,7 @@ A note about #[global_allocator]
 Allocators are the way that programs in Rust obtain memory from the system at runtime. The attribute allows Rust programs to set their allocator to the system allocator, as well as define new allocators by implementing the GlobalAlloc trait.
 
 
-# Writing the main structure
+## Writing the main structure
 
 The main structure of the contract is called "VotingContract". Structures in Rust are similar to classes, which will encompass all the required variables and functions required for the voting contract.
 
@@ -64,7 +64,7 @@ A quick look at the structure:
 
 If you think most of the hard work is done, you are completely wrong - we are just getting started :P. However, do not be overwhelmed by Rust - the more contracts you read and the more you work with, you will get into the flow of things.
 
-# Writing our first implementation
+## Writing our first implementation
 
 In Rust, there are _structures_ and there are _implementations_. The implementations, denoted by the keyword _impl_ are used to implement the methods within the structure.
 
@@ -95,7 +95,7 @@ impl VotingContract {
 
 ```
 
-# Writing our first function
+## Writing our first function
 
 So, the way we work with Rust contracts is Near is, we deploy the class/structure first within the contract and then initialise it. Let us write the constructor now.The initial contract state comes from the env variable, so we check if the contract has been initialized earlier by checking the state.
 Then we assign default values to the structure variables.
@@ -116,7 +116,7 @@ Here is our first function.
 Remember to add this function within your implementation defined in the previous quest.
 Now that we have completed our constructor, let us get onto writing some more functions.
 
-# Function to vote or withdraw the vote - Part1
+## Function to vote or withdraw the vote - Part1
 
 Let us start with the main function - vote.
 The vote function consists of two arguments - _self_ and _is_vote_
@@ -177,7 +177,7 @@ if self.result.is_some() {
 Let's move to Part 2 in the next quest.
 
 
-# Function to vote or withdraw the vote - Part2
+## Function to vote or withdraw the vote - Part2
 
 Refer to the entire function from the previous quest. We will explore the second part of the function.
 
@@ -205,10 +205,370 @@ This is quite simple right? Let us move to the next part.
 
 # Function to vote or withdraw the vote - Part3
 
-Letter start with R first function-ping.
+In the third part of the function, if the validator has voted - we will check if the value of the voted stake.
+If by adding the votes of this validator, the total stake for result has been met, the check result is called to check the results.
+As per the problem statement: Once the majority of the stakeholder vote, the transfers would be unlocked.
+
+Here is the part-3 code.
+
+```
+        let voted_stake = 7;
+        //COMMENTED: let voted_stake = self.votes.remove(&account_id).unwrap_or_default();
+        assert!(
+            voted_stake <= self.total_voted_stake,
+            "invariant: voted stake {} is more than total voted stake {}",
+            voted_stake,
+            self.total_voted_stake
+        );
+        self.total_voted_stake = self.total_voted_stake + account_stake - voted_stake;
+        if account_stake > 0 {
+            self.votes.insert(account_id, account_stake);
+            self.check_result();
+        }
+ ```
+
+We have assigned "7" as the _voted_stake_ just for testing purposes. Otherwise, the validators actual votes are obtained from the **votes** map.
+
+Let us take a quick look at one last function and then, the rest of the helper functions(getters/checkers), we would leave it upto you to decode :).
+
+## Function ping to update the votes according to current stake of validators.
+
+Let us take a look at the function ping.
 The ping function is used to update the votes according to the current stake of validators.
 
-One thing to note is here is the key word mut being passed along with the argument "self".
-The mutable keyword along with self indicates that this function is going to change the state of variables on the blockchain.
+Here is the code for the function.
 
-Whereas for functions which are read only ee we do not need to pass a mutable self object into the function.
+```
+/// Ping to update the votes according to current stake of validators.
+    pub fn ping(&mut self) {
+        assert!(self.result.is_none(), "Voting has already ended");
+        let cur_epoch_height = env::epoch_height();
+        if cur_epoch_height != self.last_epoch_height {
+            let votes = std::mem::take(&mut self.votes);
+            self.total_voted_stake = 10;
+            //COMMENTED self.total_voted_stake = 0;
+            for (account_id, _) in votes {
+                let account_current_stake = 5;
+                //env::validator_stake(&account_id);
+                self.total_voted_stake += account_current_stake;
+                if account_current_stake > 0 {
+                    self.votes.insert(account_id, account_current_stake);
+                }
+            }
+            self.check_result();
+            self.last_epoch_height = cur_epoch_height;
+        }
+    }
+```
+
+The above function does the following:
+* It checks first if the voting has ended by checking the result object.
+* epoch_height gives us the height of the epoch.
+* It calculats for the total voted stake based on the account's current stake.
+* It adds the current account stake(only if the account has chosen true) to the votes Hashmap.
+* Post the calculation, there is a call to check for the result and the epoch height is updated to the current one.
+
+The above function might seem a little intimdating but as you rad through the whole contract once or twice, you will grasp the workflow quite easily.
+
+In the next quest, we will be sharing a few getting/checker functions in the contract that you could add as is.
+
+NOTE: An epoch is usually defined as the period of time it takes for a specific number of blocks to be finalized on the chain
+
+## Adding the getter and checker functions
+
+The first function that we have been using for a while is the check_result.
+As the name suggests, this functions checks for the result of the voting process.
+
+Here is the code:
+```
+/// Check whether the voting has ended.
+    fn check_result(&mut self) {
+        assert!(
+            self.result.is_none(),
+            "check result is called after result is already set"
+        );
+        let total_stake = env::validator_total_stake();
+        if self.total_voted_stake > 2 * total_stake / 3 {
+            self.result = Some(U64::from(env::block_timestamp()));
+        }
+    }
+```
+
+The next three getter functions are used to get the result, the voted_stake and the votes.
+
+```
+/// Get the timestamp of when the voting finishes. `None` means the voting hasn't ended yet.
+    pub fn get_result(&self) -> Option<WrappedTimestamp> {
+        self.result.clone()
+    }
+
+    /// Returns current a pair of `total_voted_stake` and the total stake.
+    /// Note: as a view method, it doesn't recompute the active stake. May need to call `ping` to
+    /// update the active stake.
+    pub fn get_total_voted_stake(&self) -> (U128, U128) {
+        (
+            self.total_voted_stake.into(),
+            env::validator_total_stake().into(),
+        )
+    }
+
+    /// Returns all active votes.
+    /// Note: as a view method, it doesn't recompute the active stake. May need to call `ping` to
+    /// update the active stake.
+    pub fn get_votes(&self) -> HashMap<AccountId, U128> {
+        self.votes
+            .iter()
+            .map(|(account_id, stake)| (account_id.clone(), (*stake).into()))
+            .collect()
+    }
+```
+It is important to note that all the functions up until now need to be added within the VotingContract implementation(impl).
+
+Let us take a quick look at the tests for the contract. We will not be explaining how to write the tests but you can take a quick look at them and add them below the implementation.
+
+## Adding tests to the contract
+
+The following unit tests are used to test the contract code by creating a VMContext that can call the contract functions without actually having the need to deploy the contract on chain.
+
+Here are the tests.
+
+```
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use near_sdk::MockedBlockchain;
+    use near_sdk::{testing_env, VMContext};
+    use std::collections::HashMap;
+    use std::iter::FromIterator;
+
+    fn get_context(predecessor_account_id: AccountId) -> VMContext {
+        get_context_with_epoch_height(predecessor_account_id, 0)
+    }
+
+    fn get_context_with_epoch_height(
+        predecessor_account_id: AccountId,
+        epoch_height: EpochHeight,
+    ) -> VMContext {
+        VMContext {
+            current_account_id: "alice_near".to_string(),
+            signer_account_id: "bob_near".to_string(),
+            signer_account_pk: vec![0, 1, 2],
+            predecessor_account_id,
+            input: vec![],
+            block_index: 0,
+            block_timestamp: 0,
+            account_balance: 0,
+            account_locked_balance: 0,
+            storage_usage: 1000,
+            attached_deposit: 0,
+            prepaid_gas: 2 * 10u64.pow(14),
+            random_seed: vec![0, 1, 2],
+            is_view: false,
+            output_data_receivers: vec![],
+            epoch_height,
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "is not a validator")]
+    fn test_nonvalidator_cannot_vote() {
+        let context = get_context("bob.near".to_string());
+        let validators = HashMap::from_iter(
+            vec![
+                ("alice_near".to_string(), 100),
+                ("bob_near".to_string(), 100),
+            ]
+            .into_iter(),
+        );
+        testing_env!(context, Default::default(), Default::default(), validators);
+        let mut contract = VotingContract::new();
+        contract.vote(true);
+    }
+
+    #[test]
+    #[should_panic(expected = "Voting has already ended")]
+    fn test_vote_again_after_voting_ends() {
+        let context = get_context("alice.near".to_string());
+        let validators = HashMap::from_iter(vec![("alice.near".to_string(), 100)].into_iter());
+        testing_env!(context, Default::default(), Default::default(), validators);
+        let mut contract = VotingContract::new();
+        contract.vote(true);
+        assert!(contract.result.is_some());
+        contract.vote(true);
+    }
+
+    #[test]
+    fn test_voting_simple() {
+        let context = get_context("test0".to_string());
+        let validators = (0..10)
+            .map(|i| (format!("test{}", i), 10))
+            .collect::<HashMap<_, _>>();
+        testing_env!(
+            context,
+            Default::default(),
+            Default::default(),
+            validators.clone()
+        );
+        let mut contract = VotingContract::new();
+
+        for i in 0..7 {
+            let mut context = get_context(format!("test{}", i));
+            testing_env!(
+                context.clone(),
+                Default::default(),
+                Default::default(),
+                validators.clone()
+            );
+            contract.vote(true);
+            context.is_view = true;
+            testing_env!(
+                context,
+                Default::default(),
+                Default::default(),
+                validators.clone()
+            );
+            assert_eq!(
+                contract.get_total_voted_stake(),
+                (U128::from(10 * (i + 1)), U128::from(100))
+            );
+            assert_eq!(
+                contract.get_votes(),
+                (0..=i)
+                    .map(|i| (format!("test{}", i), U128::from(10)))
+                    .collect::<HashMap<_, _>>()
+            );
+            assert_eq!(contract.votes.len() as u128, i + 1);
+            if i < 6 {
+                assert!(contract.result.is_none());
+            } else {
+                assert!(contract.result.is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn test_voting_with_epoch_change() {
+        let validators = (0..10)
+            .map(|i| (format!("test{}", i), 10))
+            .collect::<HashMap<_, _>>();
+        let context = get_context("test0".to_string());
+        testing_env!(
+            context,
+            Default::default(),
+            Default::default(),
+            validators.clone()
+        );
+        let mut contract = VotingContract::new();
+
+        for i in 0..7 {
+            let context = get_context_with_epoch_height(format!("test{}", i), i);
+            testing_env!(
+                context,
+                Default::default(),
+                Default::default(),
+                validators.clone()
+            );
+            contract.vote(true);
+            assert_eq!(contract.votes.len() as u64, i + 1);
+            if i < 6 {
+                assert!(contract.result.is_none());
+            } else {
+                assert!(contract.result.is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn test_validator_stake_change() {
+        let mut validators = HashMap::from_iter(vec![
+            ("test1".to_string(), 40),
+            ("test2".to_string(), 10),
+            ("test3".to_string(), 10),
+        ]);
+        let context = get_context_with_epoch_height("test1".to_string(), 1);
+        testing_env!(
+            context,
+            Default::default(),
+            Default::default(),
+            validators.clone()
+        );
+
+        let mut contract = VotingContract::new();
+        contract.vote(true);
+        validators.insert("test1".to_string(), 50);
+        let context = get_context_with_epoch_height("test2".to_string(), 2);
+        testing_env!(
+            context,
+            Default::default(),
+            Default::default(),
+            validators.clone()
+        );
+        contract.ping();
+        assert!(contract.result.is_some());
+    }
+
+    #[test]
+    fn test_withdraw_votes() {
+        let validators =
+            HashMap::from_iter(vec![("test1".to_string(), 10), ("test2".to_string(), 10)]);
+        let context = get_context_with_epoch_height("test1".to_string(), 1);
+        testing_env!(
+            context,
+            Default::default(),
+            Default::default(),
+            validators.clone()
+        );
+        let mut contract = VotingContract::new();
+        contract.vote(true);
+        assert_eq!(contract.votes.len(), 1);
+        let context = get_context_with_epoch_height("test1".to_string(), 2);
+        testing_env!(
+            context,
+            Default::default(),
+            Default::default(),
+            validators.clone()
+        );
+        contract.vote(false);
+        assert!(contract.votes.is_empty());
+    }
+
+    #[test]
+    fn test_validator_kick_out() {
+        let mut validators = HashMap::from_iter(vec![
+            ("test1".to_string(), 40),
+            ("test2".to_string(), 10),
+            ("test3".to_string(), 10),
+        ]);
+        let context = get_context_with_epoch_height("test1".to_string(), 1);
+        testing_env!(
+            context,
+            Default::default(),
+            Default::default(),
+            validators.clone()
+        );
+
+        let mut contract = VotingContract::new();
+        contract.vote(true);
+        assert_eq!((contract.get_total_voted_stake().0).0, 40);
+        validators.remove(&"test1".to_string());
+        let context = get_context_with_epoch_height("test2".to_string(), 2);
+        testing_env!(
+            context,
+            Default::default(),
+            Default::default(),
+            validators.clone()
+        );
+        contract.ping();
+        assert_eq!((contract.get_total_voted_stake().0).0, 0);
+    }
+}
+```
+
+Viola! You have your contract up and running now.
+
+You can tun the ./build.sh script to build your contract and use 'near deploy' to deploy your contract to a testnet account of your choice!
+
+You can use the 'near call' command on CLI to call some of the contract functions and check the output for yourself!
+Happy Learning!
+
